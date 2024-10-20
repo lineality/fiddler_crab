@@ -252,7 +252,19 @@ fn main() {
 
                     // Very basic parsing of the request (assuming POST)
                     if request_string.starts_with("POST") {
-                        let body_start = request_string.find("\r\n\r\n").unwrap_or(0) + 4;
+                        // let body_start = request_string.find("\r\n\r\n").unwrap_or(0) + 4;
+                        // let request_body = request_string[body_start..].to_string();
+                        let body_start = match request_string.find("\r\n\r\n") {
+                            Some(index) => index + 4,
+                            None => {
+                                eprintln!("Error: Invalid request format. Could not find end of headers.");
+                                // Handle the error appropriately (e.g., return an error response to the client)
+                                // For now, let's just return 0 to avoid a crash, but you should replace this 
+                                // with more robust error handling
+                                0 
+                            }
+                        };
+                        
                         let request_body = request_string[body_start..].to_string();
                         // TODO when fails, error restart_signal = True / or drop and continue stream
 
