@@ -379,6 +379,136 @@ fn main() {
                             break; // Exit the stream-loop to signal a restart 
                         }
 
+                    } else if request_string.starts_with("GET") {
+                        /*
+                        TODO: this "works" but it returns a document containing
+                        the post-request format server return...
+                        which is something...but should be...optimized...
+                        */
+                        
+                        // let body_start = request_string.find("\r\n\r\n").unwrap_or(0) + 4;
+                        // let request_body = request_string[body_start..].to_string();
+                        let request_body = if let Some(index) = request_string.find('X') {
+                            &request_string[index + 1..] 
+                        } else {
+                            "" // No query string found
+                        };
+                        
+                        // // Parse query_string into parameters (e.g., using a library or manual splitting)
+                        // let parameters: HashMap<String, String> = /* ... parsing logic ... */;
+                        
+                        // let request_body = query_string;
+                    
+                        // Generate a unique request ID
+                        let request_id = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    
+                        // Stream Decoupling: Store stream address in RequestUnit
+                        let stream_addr = stream.peer_addr().unwrap(); 
+                        let request_unit_struct = RequestUnit {
+                            id: request_id,
+                            body: request_body.to_string(),
+                            output_for_response: None,
+                            stream_addr: stream_addr,
+                            response_status: None, // Initialize response fields to None
+                            response_headers: None,
+                            response_body: None,
+                        };
+                        
+                        // Insert the stream into the map
+                        stream_map.insert(request_id, stream);
+
+                        // if Idle
+                        // Checks if the request handler is currently in the `Idle` state.
+                        //
+                        // This function loads the current state of the handler from the `HANDLER_STATE` atomic variable
+                        // and compares it with the integer representation of the `Idle` state. 
+                        // It returns `true` if the handler is `Idle` and `false` otherwise (if it's `Busy` or `Failed`).
+                        //
+                        // Note: This check only explicitly distinguishes between `Idle` and non-`Idle` states.
+                        // It does not differentiate between `Busy` and `Failed` within this specific check. 
+                        // However, the `else` block that follows this check handles both `Busy` and `Failed` states 
+                        // by attempting to add the incoming request to the queue.
+                        if HANDLER_STATE.load(Ordering::Relaxed) == HandlerState::Idle as usize {
+                            /*
+                            handler can be: 1 busy, 2. not_busy 3. failed
+                            
+                            A. look for quit-signal_to_restart (optional, if needed later)
+                            B. if handler is not busy, give request+queue to handler & reset counter to 0
+                            C. if handler is busy, check counter
+                            E. if counter > MAX: drop request
+                            F. if counter < MAX: check if there is an existing queue
+                            G. if there is an existing queue: add request to quque
+                            H: if there is no queue: make a queue and add request to queue
+                            loop back 
+                            */
+                            // Request processing oc
+                            // when this fails (everything will fail at some point)
+                            // this should output a signal to set a 'restart' flag 
+                            // Spawn the handler thread and pass the sender channel
+                            // In main
+                            
+                            // Clone sender_clone inside the loop
+                            let sender_for_thread = sender_clone.clone(); 
+                            
+                            thread::spawn(move || {
+                                handler_of_request_and_queue(
+                                    request_unit_struct,
+                                    disposable_handoff_queue.take().unwrap(),
+                                    sender_for_thread, // Pass a clone of sender_clone
+                                );
+                            });
+
+                            // 1. handler_of_request_and_queue(request, quque)
+
+                            
+                            // Double Tap: make sure queue is removed
+                            // When the handler finishes or fails (in the handler thread or stream-loop):
+                            // let disposable_handoff_queue: Option<VecDeque<String>> = None; // Indicate that a new queue needs to be created 
+                            
+                            // 2. counter = zero
+                            // Reset the queue counter
+                            QUEUE_COUNTER.store(0, Ordering::Relaxed);
+
+                            // 3. make a new empty disposable_handoff_queue
+                            // let mut disposable_handoff_queue: Option<VecDeque<String>> = Some(VecDeque::with_capacity(MAX_QUEUE_SIZE));
+                            
+                            // if faile:
+                            // exit/continue/break stream-loop/quit/reboot
+                            
+                            
+                        } else {  // if NOT Idle: elif busy, elif failed
+                            
+                            // Handle busy/failed state (e.g., add to queue)
+                            // Check if a queue exists and add requests to it
+                            if let Some(queue) = &mut disposable_handoff_queue {
+                                // ... (add requests to the queue) ...
+                                // if queue is not full: add request to queue
+                                if QUEUE_COUNTER.load(Ordering::Relaxed) < MAX_QUEUE_SIZE {
+
+                                    // add request to queue!
+                                    queue.push_back(request_unit_struct); // Call push_back on the VecDeque inside the Option
+                     
+                                    QUEUE_COUNTER.fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                // No queue available, create a new one 
+                                // let mut disposable_handoff_queue: Option<VecDeque<String>> = Some(VecDeque::with_capacity(MAX_QUEUE_SIZE));
+                                // ... (potentially add the current request to the new queue) ...
+                            }
+                            
+
+                            } else {
+                                // Ignore the request (queue is full)
+                            }
+                            
+                            // increment counter
+                            QUEUE_COUNTER.fetch_add(1, Ordering::Relaxed);
+                        }
+                        
+                        
+                        if HANDLER_STATE.load(Ordering::Relaxed) == HandlerState::Failed as usize {
+                            println!("Handler thread failed. Restarting..."); // Log the failure
+                            break; // Exit the stream-loop to signal a restart 
+                        }
                     }
 
                     // (maybe too old of a text comment block)4. Respond
