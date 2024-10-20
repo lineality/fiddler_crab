@@ -95,15 +95,64 @@ fn process_a_request(mut request_unit_struct: RequestUnit) -> Result<RequestUnit
     }
 }
 
+// // old version does not iterate thorugh queue (oops!!)
+// fn handler_of_request_and_queue(
+//     request_unit_struct: RequestUnit, // Removed mut
+//     mut disposable_handoff_queue: VecDeque<RequestUnit>,
+//     sender: Sender<(usize, Result<RequestUnit, String>)>
+// ) {
+//     // Wrap the closure in AssertUnwindSafe
+//     let closure = AssertUnwindSafe(|| {
+//         // 1. Add request to the queue
+//         disposable_handoff_queue.push_back(request_unit_struct);
+
+//         // 2. Process the queue
+//         loop {
+//             if let Some(request_unit) = disposable_handoff_queue.pop_front() {
+//                 // Process the request and handle the result
+//                 match process_a_request(request_unit.clone()) {
+
+//                     Ok(processed_request) => {
+//                         // Send the processed RequestUnit back to the main thread 
+//                         // using the channel. The main thread will then be responsible
+//                         // for sending the HTTP response to the client.
+//                         if let Err(e) = sender.send((processed_request.id, Ok(processed_request))) {
+//                             eprintln!("Error sending processed request to main thread: {}", e);
+//                             // TODO: Handle the error appropriately (e.g., log, retry, or exit)
+//                         }
+//                     }
+//                     Err(error_message) => {
+//                         // Send the error message back to the main thread
+//                         if let Err(e) = sender.send((request_unit.id, Err(error_message))) {
+//                             eprintln!("Error sending error message to main thread: {}", e);
+//                             // TODO: Handle the error appropriately (e.g., log, retry, or exit)
+//                         }
+//                     } // Added Err case
+//                 }
+//             } else {
+//                 // Queue is empty, wait a bit before checking again
+//                 thread::sleep(Duration::from_millis(REQUEST_HANDLER_PAUSE)); 
+//             }
+//         }
+//     });
+
+//     // Call catch_unwind with the wrapped closure
+//     std::panic::catch_unwind(closure).unwrap_or_else(|_| {
+//         // Set HANDLER_STATE to Failed
+//         HANDLER_STATE.store(HandlerState::Failed as usize, Ordering::Relaxed);
+//         println!("Handler thread panicked!"); 
+//         // You'll need to return a RequestUnit here as well
+//     });
+// }
 
 fn handler_of_request_and_queue(
-    request_unit_struct: RequestUnit, // Removed mut
+    request_unit_struct: RequestUnit,
     mut disposable_handoff_queue: VecDeque<RequestUnit>,
     sender: Sender<(usize, Result<RequestUnit, String>)>
 ) {
     // Wrap the closure in AssertUnwindSafe
     let closure = AssertUnwindSafe(|| {
-        // 1. Add request to the queue
+        // 1. Add the initial request to the queue
         disposable_handoff_queue.push_back(request_unit_struct);
 
         // 2. Process the queue
@@ -111,11 +160,8 @@ fn handler_of_request_and_queue(
             if let Some(request_unit) = disposable_handoff_queue.pop_front() {
                 // Process the request and handle the result
                 match process_a_request(request_unit.clone()) {
-
                     Ok(processed_request) => {
-                        // Send the processed RequestUnit back to the main thread 
-                        // using the channel. The main thread will then be responsible
-                        // for sending the HTTP response to the client.
+                        // Send the processed RequestUnit back to the main thread
                         if let Err(e) = sender.send((processed_request.id, Ok(processed_request))) {
                             eprintln!("Error sending processed request to main thread: {}", e);
                             // TODO: Handle the error appropriately (e.g., log, retry, or exit)
@@ -127,24 +173,22 @@ fn handler_of_request_and_queue(
                             eprintln!("Error sending error message to main thread: {}", e);
                             // TODO: Handle the error appropriately (e.g., log, retry, or exit)
                         }
-                    } // Added Err case
+                    }
                 }
             } else {
                 // Queue is empty, wait a bit before checking again
-                thread::sleep(Duration::from_millis(REQUEST_HANDLER_PAUSE)); 
+                thread::sleep(Duration::from_millis(REQUEST_HANDLER_PAUSE));
             }
         }
     });
 
     // Call catch_unwind with the wrapped closure
     std::panic::catch_unwind(closure).unwrap_or_else(|_| {
-        // Set HANDLER_STATE to Failed
         HANDLER_STATE.store(HandlerState::Failed as usize, Ordering::Relaxed);
-        println!("Handler thread panicked!"); 
+        println!("Handler thread panicked!");
         // You'll need to return a RequestUnit here as well
     });
 }
-
 
 
 // TODO Add explanation here, in detail
