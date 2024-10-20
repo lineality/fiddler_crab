@@ -1,146 +1,16 @@
 /*
-slim_r_server
 
-# Slim Rust Server
-
-The project is to make an extremely minimal Rust server, 
-
-## A very basic server to: 
-- get a post request
-- that uses a minimal load-management system
-- has https support
-- is crash-resistant
-- that calls an another program e.g. python or llama cpp, though there is a rust_llamacpp if that works.
--- python: that runs a run script as an external operation e.g. run $python script.py -{"hell world"}
-
-Not requirements:
-- the this is not a normal server
-- this server does not need many async 'worker' or other threads
-
-requirements:
-- a can-fail-routinely loop to make a new disposable_handoff_queue
-- a can-fail-routinely loop to make a new single request-handler
-- an extremely strict way to regulate that the server is not taxed with any work at all when excess requests come in: passively ignore them and do nothing at all: no prints, no logs, no responses, DO NOTHING and move on. (the optimal design for this may not be in place, if not, request better solutions for this, that is important. is checking the length of the array 'easy' enough as server work, or should there be a better method?, possibly even a time-lag on even checking for the size of the queue if it has been found to be full, and dropping, ignoring, any requests that come in in the mean time.)
-- the server is designed to handle one maybe two requests at a time and be indestructible, ignoring failures and ignoring request floods and slowly marching on.
-
-## principles:
-- 'fail and try again'
-- minimal, as much 'vanilla Rust' with no other packages as possible.
-
-# minimal load management system:
-1. queue:
-- all incoming requests are first put into a queue
-- the queue has a max length, perhaps 500 or 1000, after which requests are just dropped. This should be coded in a such a way as to protect the server from getting overloaded with requests, however that is done. perhaps: if len(queue)>500 {drop}; or a struct that only holds that many and attempts to add more are ignored, whatever is least-work for the server.
-
-2. the queue is handled one item at a time with some pace-wait time to be set as a constant.
-
-3. this is not a multi-worker-thread server, this is a FIFO queue server that may be slow but should be impossible to over-load. e.g. in k8s this could be scaled in various ways.
-
-4. crash resistance: the disposable_handoff_queue should be free to fail and be disposed of and a new fresh (however empty) queue being created without bother. e.g. two loops: a queue loops that makes a clean queue if the old one fails for any reason. and a FIFO queue handler thread that takes the next item in the queue (and when if fails, and new thread handler is made)
-
-5. if the server is overwhelmed by requests it is imperative that the server do as little as possible, ideally absolutely nothing, to ignore the flood of requests. no prints, no logs, no response, nothing; not even an action to check the size of the queue if possible (e.g. if the queue is a fixed size and adding to it fails, whatever is the least effort). 
-
-## use-case example:
-- a process that takes most of the cpu-gpu of the server cannot be multiplied in threads, but must be run more serially. speed is not the goal, parallel is not the goal, not-crashing is the goal, resource-balancing is the goal, not crashing is the goal
-
-
-please start with initial MVP code that runs gradually adding features,
-not all features need to exist in the first version
-
-even though we will try (again) with tokio and hyper,
-remember this is not a generic async multi-thread react server
-this is a minimal server, review the specs and requirements.
-
-see:
-- https://docs.rs/llama_cpp/latest/llama_cpp/
-- https://docs.rs/bounded-vec-deque/latest/bounded_vec_deque/ 
-
-
-# # Variations
-1. A first mvp version of this should be tried with standard library non-async as the scope, e.g. for very resource intensive operations (data science endpoints).
-2. But a more fully async version for smaller operations, basic micro endpoints but still load/crash resistant.
-
-
-# Queue Handoff
-The length-count is not the only thing requiring access to the queue. The main listening loop also needs to add items to the queue when new requests arrive.
-
-
-Having the handler loop take ownership of the whole queue and then having the main listener create a new queue is sometimes referred to as a "queue handoff" or "queue exchange."
-
-Benefits of Queue Handoff:
-
-Simplified Ownership: The ownership of the queue is clearly defined at each point in time. The handler loop owns the queue while it's processing it, and the main listener owns the queue while it's receiving requests.
-
-Reduced Contention: There's no need for locks or mutexes to protect the queue because only one thread accesses it at any given time.
-
-Potential for Parallelism: If you want to introduce a limited degree of concurrency (e.g., with a small thread pool), you could have multiple handler loops, each taking ownership of a separate queue.
-
-
-# Overall Design:
-headline: The request streamloop and the request_handler will NOT be concurrently accessing the same disposable_handoff_queue.
-
-loop 1: 
-application runs in a loop that restarts when it fails
-
-stream-loop 2:
-Requests ~are added to a max-sized queue 
-(tracked with a counter).
-when queue is full (if counter > MAX): 
-server ignores additional requests (zero action taken).
-
-if request_handler state is idle: pass along request and Queue Handoff
-
-
-process loop 3: in request_handler
-process request and queue in thread with 3 states:
-1. busy
-2. idle
-3. failed
-
-Note:  handler will NOT be concurrently accessing the same queue
-Pay attention to the specific design of this system.
-This is not a thread-sharing updated-queue where one queue is both updated and processed, this is Queue Handoff.
-
-e.g.
-If the handler is never busy when the next request comes in (if the traffic is slow), then the server simply passes each new request (and an empty queue) into the handler.
-
-If the handler is busy (and the queue is not full) the stream-loop keep adding (up to MAX quantity) new requests to a disposable Handoff_Queue
-
-(however the presence or absence of a queue is handled,
-e.g. maybe here is an array of queues that is either empty of full (of 1), you can check the size of that to see if there is a handoff_queue
-
-let mut vec handoffqueue_container;
-
-after the disposable_handoff_queue
-
-The request streamloop and the request_handler will NOT be concurrently accessing the same disposable_handoff_queue.
-Again: The request streamloop and the request_handler will NOT be concurrently accessing the same disposable_handoff_queue.
-
-
-approach:
-HandlerState Enum: We define the HandlerState enum to represent the possible states of the request handler.
-HANDLER_STATE Atomic Variable: We declare a static atomic variable HANDLER_STATE to store the current state of the handler. It's initialized to HandlerState::Idle.
-process_request Function (Updated): We update the process_request function to set the HANDLER_STATE to either Idle or Failed depending on whether the request processing was successful or not.
-Main Loop (Updated): In the main loop, before passing a request to the handler, we check the HANDLER_STATE using load(Ordering::Relaxed). If it's Idle, we proceed with passing the request. Otherwise, we handle the busy or failed state (e.g., by adding the request to the queue).
-
-AtomicUsize
-Represents an unsigned integer (usize) that can be safely accessed and modified by multiple threads concurrently.
-It provides atomic operations (e.g., load, store, compare-and-swap) that guarantee that these operations are completed as a single, indivisible unit, preventing race conditions.
-It is not designed to store strings directly.
-Why 
-In the previous code, we used AtomicUsize to represent the HANDLER_STATE because:
-Enum Representation: We defined the HandlerState enum with different states (Busy, Idle, Failed).
-Integer Mapping: We implicitly mapped these enum variants to integer values (e.g., Idle might be 0, Busy might be 1, and Failed might be 2). This mapping is done automatically by the compiler when you cast an enum to an integer (e.g., HandlerState::Idle as usize).
-Atomic Storage: We needed an atomic variable to store this integer representation of the state so that multiple threads could safely access and update it. AtomicUsize is suitable because it can store unsigned integers.
-In essence, we are using 
 
 */
 use std::io::prelude::*;
-use std::net::{TcpListener};
+use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::collections::VecDeque;
 use std::time::Duration;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{Sender, Receiver};
+use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 
 const MAX_QUEUE_SIZE: usize = 500;
 const PROCESSING_DELAY_MS: u64 = 100; // Adjust as needed
@@ -185,64 +55,105 @@ enum HandlerState {
 /// AtomicUsize is suitable because it can store unsigned integers.
 static HANDLER_STATE: AtomicUsize = AtomicUsize::new(HandlerState::Idle as usize); 
 
-// Placeholder for external program execution
-fn process_request(request_data: String) {
-    // TODO: Implement calling external program (e.g., Python, llama.cpp)
-    println!("Processing request: {}", request_data); 
-    // Simulate processing delay
-    thread::sleep(Duration::from_millis(PROCESSING_DELAY_MS));
+#[derive(Clone, Debug)]
+struct RequestUnit {
+    id: usize,
+    body: String,
+    output_for_response: Option<String>,
+    stream_addr: std::net::SocketAddr, // Or a unique stream ID
+    response_status: Option<u16>, 
+    response_headers: Option<Vec<(String, String)>>,
+    response_body: Option<String>,
 }
 
-// todo: modify to accept -> handler_of_request_and_queue(request_string, disposable_handoff_queue);
-// fn handler_of_request_and_queue(
-//     request_body: String, 
-//     mut disposable_handoff_queue: VecDeque<String>
-// ) {
-//     // 1. Add request to queue
-//     disposable_handoff_queue.push_back(request_body);
+// for processing and functions on request data
+fn process_a_request(mut request_unit_struct: RequestUnit) -> Result<RequestUnit, String> {
+    // TODO: Implement calling external program (e.g., Python, llama.cpp)
+    println!("Processing request: {:?}", request_unit_struct);
+    
+    // 1. select parse_preprocess_function()
+    // e.g. extract and read fields from json
+    // process header, etc.
+    
+    // 2. select/run output_function()
+    let result_of_function = request_unit_struct.body.clone(); // ... get output from external program ...
 
-//     // 2. Process queue
-//     loop {
-//         if let Some(request_data) = disposable_handoff_queue.pop_front() {
-//             process_request(request_data);
-//         } else {
-//             // Queue is empty, wait a bit before checking again
-//             thread::sleep(Duration::from_millis(REQUEST_HANDLER_PAUSE)); // Adjust as needed
-//         }
-//     } // TODO: add error handling so if they fails for any reason
-//     // it sends a signal for the other loop to restart
-// }
+    // 3. Set up Response Data   
+    request_unit_struct.response_status = Some(200); 
+    request_unit_struct.response_headers = Some(vec![("Content-Type".to_string(), "text/plain".to_string())]); 
+    request_unit_struct.response_body = Some(result_of_function);
+
+        
+    // intentional delay
+    thread::sleep(Duration::from_millis(PROCESSING_DELAY_MS));
+    
+    // Return the modified RequestUnit or an error message
+    if /* processing successful */ true {
+        Ok(request_unit_struct) // Return the RequestUnit directly
+    } else {
+        Err("Processing failed".to_string())
+    }
+}
+
+
 fn handler_of_request_and_queue(
-    request_body: String, 
-    disposable_handoff_queue: VecDeque<String> 
+    request_unit_struct: RequestUnit, // Removed mut
+    mut disposable_handoff_queue: VecDeque<RequestUnit>,
+    sender: Sender<(usize, Result<RequestUnit, String>)>
 ) {
-    std::panic::catch_unwind(|| {
-        let mut queue_clone = disposable_handoff_queue.clone(); // Clone the queue
+    // Wrap the closure in AssertUnwindSafe
+    let closure = AssertUnwindSafe(|| {
+        // 1. Add request to the queue
+        disposable_handoff_queue.push_back(request_unit_struct);
 
-        // 1. Add request to the cloned queue
-        queue_clone.push_back(request_body);
-
-        // 2. Process the cloned queue
+        // 2. Process the queue
         loop {
-            if let Some(request_data) = queue_clone.pop_front() {
-                process_request(request_data);
+            if let Some(request_unit) = disposable_handoff_queue.pop_front() {
+                // Process the request and handle the result
+                match process_a_request(request_unit.clone()) {
+
+                    Ok(processed_request) => {
+                        // Send the processed RequestUnit back to the main thread 
+                        // using the channel. The main thread will then be responsible
+                        // for sending the HTTP response to the client.
+                        if let Err(e) = sender.send((processed_request.id, Ok(processed_request))) {
+                            eprintln!("Error sending processed request to main thread: {}", e);
+                            // TODO: Handle the error appropriately (e.g., log, retry, or exit)
+                        }
+                    }
+                    Err(error_message) => {
+                        // Send the error message back to the main thread
+                        if let Err(e) = sender.send((request_unit.id, Err(error_message))) {
+                            eprintln!("Error sending error message to main thread: {}", e);
+                            // TODO: Handle the error appropriately (e.g., log, retry, or exit)
+                        }
+                    } // Added Err case
+                }
             } else {
-            // Queue is empty, wait a bit before checking again
-            thread::sleep(Duration::from_millis(REQUEST_HANDLER_PAUSE)); // Adjust as needed
+                // Queue is empty, wait a bit before checking again
+                thread::sleep(Duration::from_millis(REQUEST_HANDLER_PAUSE)); 
             }
         }
-    }).unwrap_or_else(|_| {
+    });
+
+    // Call catch_unwind with the wrapped closure
+    std::panic::catch_unwind(closure).unwrap_or_else(|_| {
         // Set HANDLER_STATE to Failed
         HANDLER_STATE.store(HandlerState::Failed as usize, Ordering::Relaxed);
         println!("Handler thread panicked!"); 
-    }); 
+        // You'll need to return a RequestUnit here as well
+    });
 }
+
+
 
 // TODO Add explanation here, in detail
 /*
 text
 */
 static QUEUE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+static REQUEST_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 
 fn main() {
     
@@ -259,20 +170,17 @@ fn main() {
     // queue when the server starts. It might also handle the creation of a new queue if the handler thread 
     // encounters an error, but this logic might also be delegated to the stream-loop.
     loop {
-        
-        // in stream-loop?
-        // // Bootstrap: Make a first empty queue
-        // let mut disposable_handoff_queue: Vec<String> = Vec::with_capacity(MAX_QUEUE_SIZE); 
-
-        // // Bootstrap: set restart_signal flag
-        // let mut signal_to_restart = false;
-
-        // // Bootstrap: set restart_signal flag
-        // let mut counter = 0;        
-
-
         let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
         // TODO error handling, when fails: signal_to_restart = True, restart loop
+
+        // Create a channel for communication between the main thread and the handler thread
+        let (sender, receiver): (Sender<(usize, Result<RequestUnit, String>)>, Receiver<(usize, Result<RequestUnit, String>)>) = std::sync::mpsc::channel();
+
+        // Create a mapping to store streams by request ID
+        let mut stream_map: HashMap<usize, TcpStream> = HashMap::new();
+
+        // Clone the sender before entering the loop
+        let sender_clone = sender.clone();
 
         
         // Purpose: The stream-loop is responsible for listening for incoming requests, 
@@ -288,20 +196,9 @@ fn main() {
             match stream {
                 Ok(mut stream) => {
                     
-                    // make sure no old queue exists
-                    // let disposable_handoff_queue: Option<VecDeque<String>> = None;
-
-
                     // Initial creation (in the main loop)
-                    let mut disposable_handoff_queue: Option<VecDeque<String>> = Some(VecDeque::with_capacity(MAX_QUEUE_SIZE));
-                                        
+                    let mut disposable_handoff_queue: Option<VecDeque<RequestUnit>> = Some(VecDeque::with_capacity(MAX_QUEUE_SIZE));
                 
-                    // // check restart single to exit stream, restart main(loop)
-                    // if restart_signal{
-                    //     exit stream; // TODO this is pseuodcode
-                    // }
-                        
-                    
                     let mut buffer = [0; 1024];
                     stream.read(&mut buffer).unwrap();
                     // TODO when fails, error restart_signal = True / or drop and continue stream
@@ -311,29 +208,28 @@ fn main() {
 
                     // Very basic parsing of the request (assuming POST)
                     if request_string.starts_with("POST") {
-                        
                         let body_start = request_string.find("\r\n\r\n").unwrap_or(0) + 4;
-                        // TODO when fails, error restart_signal = True / or drop and continue stream
-                        
-                        // let request_body = request_string[body_start..].to_string();
-                        // let request_string = String::from_utf8_lossy(&buffer[..]);
                         let request_body = request_string[body_start..].to_string();
                         // TODO when fails, error restart_signal = True / or drop and continue stream
 
-                        // 
-                        /*                        
-                        Design question:
-                        What kind of structure/thread can the handler be or be in
-                        that has states:
-                        1. busy
-                        2. idle
-                        3. failed
+                        // Generate a unique request ID
+                        let request_id = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    
+                        // Stream Decoupling: Store stream address in RequestUnit
+                        let stream_addr = stream.peer_addr().unwrap(); 
+                        let request_unit_struct = RequestUnit {
+                            id: request_id,
+                            body: request_body,
+                            output_for_response: None,
+                            stream_addr: stream_addr,
+                            response_status: None, // Initialize response fields to None
+                            response_headers: None,
+                            response_body: None,
+                        };
                         
-                        scoped threads?
-                        thread parking?
-                        
-                        */
-                        
+                        // Insert the stream into the map
+                        stream_map.insert(request_id, stream);
+
                         // if Idle
                         // Checks if the request handler is currently in the `Idle` state.
                         //
@@ -361,12 +257,19 @@ fn main() {
                             // Request processing oc
                             // when this fails (everything will fail at some point)
                             // this should output a signal to set a 'restart' flag 
+                            // Spawn the handler thread and pass the sender channel
+                            // In main
+                            
+                            // Clone sender_clone inside the loop
+                            let sender_for_thread = sender_clone.clone(); 
+                            
                             thread::spawn(move || {
                                 handler_of_request_and_queue(
-                                    request_body.to_string(), 
-                                    disposable_handoff_queue.expect("REASON")
+                                    request_unit_struct,
+                                    disposable_handoff_queue.take().unwrap(),
+                                    sender_for_thread, // Pass a clone of sender_clone
                                 );
-                            }); // TODO error handling, when fails: signal_to_restart = True
+                            });
 
                             // 1. handler_of_request_and_queue(request, quque)
 
@@ -396,13 +299,9 @@ fn main() {
                                 if QUEUE_COUNTER.load(Ordering::Relaxed) < MAX_QUEUE_SIZE {
 
                                     // add request to queue!
-                                    queue.push_back(request_body.to_string()); // Call push_back on the VecDeque inside the Option
+                                    queue.push_back(request_unit_struct); // Call push_back on the VecDeque inside the Option
                      
                                     QUEUE_COUNTER.fetch_add(1, Ordering::Relaxed);
-                                    
-                                    
-                                    
-                                
                             } else {
                                 // No queue available, create a new one 
                                 // let mut disposable_handoff_queue: Option<VecDeque<String>> = Some(VecDeque::with_capacity(MAX_QUEUE_SIZE));
@@ -426,9 +325,56 @@ fn main() {
 
                     }
 
-                    let response = "HTTP/1.1 200 OK\r\n\r\n";
-                    stream.write(response.as_bytes()).unwrap();
-                    stream.flush().unwrap();
+                    // (maybe too old of a text comment block)4. Respond
+                    /*
+                    Check for Valid Response Data: We first check if the response_status, response_headers, 
+                    and response_body fields in the RequestUnit have been populated.
+                
+                    Establish Connection: We use TcpStream::connect to establish a new connection 
+                    to the client using the stream_addr stored in the RequestUnit.
+                
+                    Send Status Line: We construct the HTTP status line (e.g., "HTTP/1.1 200 OK\r\n") 
+                    and send it through the stream.
+                
+                    Send Headers: We iterate through the response_headers and send each 
+                    header line (e.g., "Content-Type: text/plain\r\n").
+                
+                    Send Empty Line: We send an empty line ("\r\n") to indicate the end of the headers.
+                
+                    Send Response Body: Finally, we send the response_body through the stream.
+                    */
+                    // 4?
+                    // Receive the processed RequestUnit or error from the channel
+                    if let Ok((request_id, result)) = receiver.recv() {
+                        // Find the corresponding stream using the request ID
+                        if let Some(mut stream) = stream_map.remove(&request_id) {
+                            // Handle the result from the handler
+                            match result {
+                                Ok(processed_request) => {
+                                    // Send successful response
+                                    let response = format!(
+                                        "HTTP/1.1 {} OK\r\nContent-Type: text/plain\r\n\r\n{}",
+                                        processed_request.response_status.unwrap_or(200), // Get status or default to 200
+                                        processed_request.response_body.unwrap_or_default() // Get body or default to empty
+                                    );
+                                    stream.write_all(response.as_bytes()).unwrap();
+                                    stream.flush().unwrap(); // Flush the stream to ensure data is sent
+                                }
+                                Err(error_message) => {
+                                    // Send error response
+                                    let response = format!("HTTP/1.1 500 Internal Server Error\r\n\r\n{}", error_message);
+                                    stream.write_all(response.as_bytes()).unwrap();
+                                    stream.flush().unwrap(); // Flush the stream
+                                }
+                            }
+                        } else {
+                            eprintln!("Stream not found for request ID: {}", request_id);
+                            // Handle the case where the stream is not found
+                        }
+                    } else {
+                        eprintln!("Error receiving data from handler thread.");
+                        // Handle the error appropriately
+                    }
                 }
                 Err(e) => {
                     eprintln!("Error accepting connection: {}", e);
