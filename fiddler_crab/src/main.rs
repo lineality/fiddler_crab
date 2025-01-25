@@ -1,5 +1,8 @@
 /*
 
+Endpoints:
+
+make sure there is an endpoint_modules directory in src with main.rs
 
 */
 use std::io::prelude::*;
@@ -11,6 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
+
 
 const MAX_QUEUE_SIZE: usize = 500;
 const PROCESSING_DELAY_MS: u64 = 100; // Adjust as needed
@@ -58,6 +62,7 @@ static HANDLER_STATE: AtomicUsize = AtomicUsize::new(HandlerState::Idle as usize
 #[derive(Clone, Debug)]
 struct RequestUnit {
     id: usize,
+    endpoint_module_name: Option<String>,  // or module-function name, whatever
     body: String,
     output_for_response: Option<String>,
     stream_addr: std::net::SocketAddr, // Or a unique stream ID
@@ -66,34 +71,308 @@ struct RequestUnit {
     response_body: Option<String>,
 }
 
-// for processing and functions on request data
-fn process_a_request(mut request_unit_struct: RequestUnit) -> Result<RequestUnit, String> {
-    // TODO: Implement calling external program (e.g., Python, llama.cpp)
-    println!("Processing request: {:?}", request_unit_struct);
-    
-    // 1. select parse_preprocess_function()
-    // e.g. extract and read fields from json
-    // process header, etc.
-    
-    // 2. select/run output_function()
-    let result_of_function = request_unit_struct.body.clone(); // ... get output from external program ...
 
-    // 3. Set up Response Data   
-    request_unit_struct.response_status = Some(200); 
-    request_unit_struct.response_headers = Some(vec![("Content-Type".to_string(), "text/plain".to_string())]); 
-    request_unit_struct.response_body = Some(result_of_function);
 
-        
-    // intentional delay
-    thread::sleep(Duration::from_millis(PROCESSING_DELAY_MS));
-    
-    // Return the modified RequestUnit or an error message
-    if /* processing successful */ true {
-        Ok(request_unit_struct) // Return the RequestUnit directly
-    } else {
-        Err("Processing failed".to_string())
+
+
+/// Routes an incoming request to its specified endpoint-module for processing
+/// and returns the processed result. This function is part of the modular
+/// endpoint system where individual endpoint-modules handle specific types
+/// of requests.
+/// 
+/// # Modular Endpoint System
+/// Each endpoint-module:
+/// - Lives in its own directory in endpoint_modules/
+/// - Has its own input/output handling
+/// - Is referenced in the endpoint lookup table
+/// - Processes its specific type of request
+/// 
+/// # Function Steps
+/// 1. Gets endpoint module name from request
+/// 2. Validates module exists in lookup table
+/// 3. Routes request to the module
+/// 4. Returns processed result or error
+/// 
+/// # Arguments
+/// * `request_unit_struct` - Contains:
+///   - endpoint_module_name: name of module to process request
+///   - body: request data to be processed
+///   - fields for response data
+/// 
+/// # Returns
+/// * `Result<RequestUnit, String>` 
+///   - Ok: RequestUnit with processed response
+///   - Err: Error message if routing or processing fails
+///
+/// # Error Handling
+/// Returns Err if:
+/// - No endpoint module is specified
+/// - Specified endpoint module not found in lookup table
+/// - Module processing fails
+/// fn route_request_to_endpoint_module(mut request_unit_struct: RequestUnit) -> Result<RequestUnit, String> {
+/// process_request_with_module
+fn process_request_with_module(mut request_unit_struct: RequestUnit) -> Result<RequestUnit, String> {
+
+    // Log incoming request for debugging
+    println!("Routing request to endpoint module: {:?}", request_unit_struct);
+
+    // 1. Get endpoint module name from request
+    let endpoint_module_name = request_unit_struct.endpoint_module_name
+        .as_ref()
+        .ok_or("No endpoint module specified")?;
+
+    // 2. Validate: check if endpoint module exists in lookup table
+    // TODO: implement actual lookup table check
+    if !validate_endpoint_module_exists(endpoint_module_name) {
+        return Err(format!("Endpoint module not found among modules: {}", endpoint_module_name));
     }
+
+    // 3. TODO: Route to Module
+    // - Get module from lookup table
+    // - Pass request data to module
+    // - Get processed result from module
+
+    // 4. For now, return error to force implementation discussion
+    Err("Need concrete implementation of module lookup and processing".to_string())
 }
+
+// /// Processes a request by routing it to the appropriate module and handling the response
+// /// 
+// /// # Arguments
+// /// * `request_unit_struct` - Contains request data including endpoint module name and body
+// /// 
+// /// # Returns
+// /// * `Result<RequestUnit, String>` - Processed request unit with response or error
+// fn process_request_with_module(mut request_unit_struct: RequestUnit) -> Result<RequestUnit, String> {
+//     println!("Processing request with module: {:?}", request_unit_struct);
+
+//     // 1. Get module name
+//     let module_name = request_unit_struct.endpoint_module_name
+//         .as_ref()
+//         .ok_or("No module specified")?;
+
+//     // 2. Check if module exists
+//     // TODO: implement proper module lookup/validation
+//     if !module_exists(module_name) {
+//         return Err(format!("Module not found: {}", module_name));
+//     }
+
+//     // 3. Process with module
+//     // TODO: implement proper module interface
+//     let processed_output = match route_request_to_endpoint_module(&request_unit_struct.body, module_name) {
+//         Ok(output) => output,
+//         Err(e) => return Err(format!("Module processing error: {}", e)),
+//     };
+
+//     // 4. Package response
+//     request_unit_struct.response_status = Some(200);
+//     request_unit_struct.response_headers = Some(vec![
+//         ("Content-Type".to_string(), "application/json".to_string())
+//     ]);
+//     request_unit_struct.response_body = Some(processed_output);
+
+//     Ok(request_unit_struct)
+// }
+
+// /// Routes an incoming request to its specified endpoint-module for processing
+// /// and returns the processed result.
+// /// 
+// /// # Arguments
+// /// * `request_unit_struct` - Contains request data including endpoint module name and body
+// /// 
+// /// # Returns
+// /// * `Result<RequestUnit, String>` - Processed request unit with response or error
+// fn route_request_to_endpoint_module(mut request_unit_struct: RequestUnit) -> Result<RequestUnit, String> {
+//     println!("Routing request to endpoint module: {:?}", request_unit_struct);
+
+//     // 1. Get endpoint module name
+//     let endpoint_module_name = request_unit_struct.endpoint_module_name
+//         .as_ref()
+//         .ok_or("No endpoint module specified")?;
+
+//     // 2. Check if endpoint module exists in lookup table
+//     // TODO: Actually check a real lookup table
+//     if !endpoint_module_exists_in_lookup_table(endpoint_module_name) {
+//         return Err(format!("Endpoint module not found in lookup table: {}", endpoint_module_name));
+//     }
+
+//     // TODO: Need concrete steps here for:
+//     // - Getting the module
+//     // - Running the module
+//     // - Getting output from module
+
+//     // For now, return error to force discussion of concrete next steps
+//     Err("Need concrete implementation of module lookup and processing".to_string())
+// }
+
+// Helper functions that need to be implemented:
+fn module_exists(module_name: &str) -> bool {
+    // TODO: implement actual module checking
+    true  // temporary
+}
+
+fn validate_endpoint_module_exists(endpoint_module_name: &str) -> bool {
+    // Check if directory exists in endpoint_modules/
+    let module_path = format!("endpoint_modules/{}", endpoint_module_name);
+    std::path::Path::new(&module_path).is_dir()
+}
+
+
+// /// Processes an individual request by routing it to the appropriate endpoint module
+// /// and handling the response.
+// ///
+// /// # Arguments
+// /// * `request_unit_struct` - A mutable RequestUnit containing the request details
+// ///   including endpoint name, request body, and fields for response data
+// ///
+// /// # Returns
+// /// * `Result<RequestUnit, String>` - Returns either the processed RequestUnit with
+// ///   response data or an error message
+// ///
+// /// # Processing Steps
+// /// 1. Validates the endpoint module exists
+// /// 2. Parses the request body according to endpoint specifications
+// /// 3. Processes the request using the endpoint module
+// /// 4. Formats the response
+// ///
+// /// # Error Handling
+// /// * Returns error if endpoint module is not found
+// /// * Returns error if request parsing fails
+// /// * Returns error if processing fails
+// /// * Returns error if response formatting fails
+// fn process_a_request(mut request_unit_struct: RequestUnit) -> Result<RequestUnit, String> {
+//     println!("Processing request: {:?}", request_unit_struct);
+
+//     // 1. Validate endpoint module exists
+//     let endpoint_name = match &request_unit_struct.endpoint_module_name {
+//         Some(name) => name,
+//         None => return Err("No endpoint module specified".to_string()),
+//     };
+
+//     // 2. Look up module and parse request
+//     // This could be a match statement or HashMap lookup of registered endpoints
+//     match endpoint_name.as_str() {
+//         "endpoint_modules/return/module.rs" => {
+//             // Parse input using the module's parse function
+//             let parsed_input = match parse_return_module_input(&request_unit_struct.body) {
+//                 Ok(input) => input,
+//                 Err(e) => return Err(format!("Failed to parse input: {}", e)),
+//             };
+
+//             // Process using the module
+//             let processed_output = match process_return_module(parsed_input) {
+//                 Ok(output) => output,
+//                 Err(e) => return Err(format!("Failed to process: {}", e)),
+//             };
+
+//             // Convert output to response format
+//             request_unit_struct.output_for_response = Some(processed_output);
+//         },
+//         // Add other endpoints here
+//         _ => return Err(format!("Unknown endpoint: {}", endpoint_name)),
+//     }
+
+//     // Convert the output to JSON string
+//     let response_body = match convert_output_to_json_string(&request_unit_struct.output_for_response) {
+//         Ok(json) => json,
+//         Err(e) => return Err(format!("Failed to format response: {}", e)),
+//     };
+
+//     // Set up response data
+//     request_unit_struct.response_status = Some(200);
+//     request_unit_struct.response_headers = Some(vec![
+//         ("Content-Type".to_string(), "application/json".to_string())
+//     ]);
+//     request_unit_struct.response_body = Some(response_body);
+
+//     // Add intentional processing delay if configured
+//     thread::sleep(Duration::from_millis(PROCESSING_DELAY_MS));
+
+//     Ok(request_unit_struct)
+// }
+
+fn convert_output_to_json_string(output: &Option<String>) -> Result<String, String> {
+    // Implementation needed
+    unimplemented!()
+}
+
+// // for processing and functions on request data
+// /// TODO Doc String Needed!!!
+// fn process_a_request(mut request_unit_struct: RequestUnit) -> Result<RequestUnit, String> {
+//     // likely now calling endpoint modules
+    
+//     println!("Processing request: {:?}", request_unit_struct);
+    
+    
+    
+//     // select parse_preprocess_function()
+//     // e.g. extract and read fields from json
+//     // process header, etc.
+    
+//     // note: there may be instruction about how the parse the request-body
+//     // in a parse_instructions lookup table too
+
+//     let endpoint_module_name = request_unit_struct.endpoint_module_name;
+    
+//     // look up enums and structs based on endpoint_module_name
+//     // attempt to match request body to input fields (with safe error handling)
+//     // add input field data to module_struct
+//     // send module struct with inputs to the module
+//     // module returns the struct with outputs (or error etc)
+    
+//     // turn struct into a json-string with meta-data fields
+//     let result_of_function = convert_output_to_json_str(request_unit_struct.output_for_response);
+    
+//     // 2. select/run output_function()
+//     // let result_of_function = json_string_of_struct;
+
+//     // 3. Set up Response Data   
+//     request_unit_struct.response_status = Some(200); 
+//     request_unit_struct.response_headers = Some(vec![("Content-Type".to_string(), "text/plain".to_string())]); 
+//     request_unit_struct.response_body = Some(result_of_function);
+
+//     // intentional delay
+//     thread::sleep(Duration::from_millis(PROCESSING_DELAY_MS));
+    
+//     // Return the modified RequestUnit or an error message
+//     if /* processing successful */ true {
+//         Ok(request_unit_struct) // Return the RequestUnit directly
+//     } else {
+//         Err("Processing failed".to_string())
+//     }
+// }
+
+// module version draft
+// fn process_a_request(mut request_unit: RequestUnit) -> Result<RequestUnit, String> {
+//     // ... other code ...
+
+//     // Extract endpoint name from module_path
+//     let endpoint_name = // ... your logic to extract endpoint name from module_path ...
+
+//     // Look up the module definition in the HashMap
+//     if let Some(module_function) = ENDPOINT_MODULES.get(endpoint_name) {
+//         // Based on the endpoint_name, create the correct ModuleData struct and parse the input
+//         match endpoint_name {
+//             "return" => {
+//                 let input = // ... parse request_unit.body into ReturnInputFields ...
+//                 let mut module_data = ReturnModuleData { input, output: ReturnOutputFields::ReturnedString(String::new()) };
+                
+//                 module_data = module_function(module_data)?; 
+
+//                 // Extract the output from module_data.output and set request_unit.response_body
+//                 // ...
+//             },
+//             "process_data" => {
+//                 // ... Similar logic for "process_data" endpoint ...
+//             },
+//             _ => return Err(format!("Invalid endpoint: {}", endpoint_name)), 
+//         }
+//     } else {
+//         return Err(format!("Invalid endpoint: {}", endpoint_name)); 
+//     }
+
+//     // ... other code ...
+// }
 
 // // old version does not iterate thorugh queue (oops!!)
 // fn handler_of_request_and_queue(
@@ -159,7 +438,7 @@ fn handler_of_request_and_queue(
         loop {
             if let Some(request_unit) = disposable_handoff_queue.pop_front() {
                 // Process the request and handle the result
-                match process_a_request(request_unit.clone()) {
+                match process_request_with_module(request_unit.clone()) {
                     Ok(processed_request) => {
                         // Send the processed RequestUnit back to the main thread
                         if let Err(e) = sender.send((processed_request.id, Ok(processed_request))) {
@@ -270,11 +549,19 @@ fn main() {
 
                         // Generate a unique request ID
                         let request_id = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-                    
+
+                        // for endpoint-module: After parsing the request path
+                        // let endpoint_name = &request_path[1..request_path.find('/').unwrap_or(request_path.len())]; // Remove leading '/'
+                        let endpoint_name = &request_body[1..request_body.find('/').unwrap_or(request_body.len())]; // Remove leading '/'
+                        
+                        // for endpoint-module
+                        let endpoint_module_name = format!("endpoint_modules/{}/module.rs", endpoint_name);
+
                         // Stream Decoupling: Store stream address in RequestUnit
                         let stream_addr = stream.peer_addr().unwrap(); 
                         let request_unit_struct = RequestUnit {
                             id: request_id,
+                            endpoint_module_name: Some(endpoint_module_name),
                             body: request_body,
                             output_for_response: None,
                             stream_addr: stream_addr,
@@ -378,138 +665,139 @@ fn main() {
                             println!("Handler thread failed. Restarting..."); // Log the failure
                             break; // Exit the stream-loop to signal a restart 
                         }
-
-                    } else if request_string.starts_with("GET") {
-                        /*
-                        TODO: this "works" but it returns a document containing
-                        the post-request format server return...
-                        which is something...but should be...optimized...
-                        */
-                        
-                        // let body_start = request_string.find("\r\n\r\n").unwrap_or(0) + 4;
-                        // let request_body = request_string[body_start..].to_string();
-                        let request_body = if let Some(index) = request_string.find('X') {
-                            &request_string[index + 1..] 
-                        } else {
-                            "" // No query string found
-                        };
-                        
-                        // // Parse query_string into parameters (e.g., using a library or manual splitting)
-                        // let parameters: HashMap<String, String> = /* ... parsing logic ... */;
-                        
-                        // let request_body = query_string;
-                    
-                        // Generate a unique request ID
-                        let request_id = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-                    
-                        // Stream Decoupling: Store stream address in RequestUnit
-                        let stream_addr = stream.peer_addr().unwrap(); 
-                        let request_unit_struct = RequestUnit {
-                            id: request_id,
-                            body: request_body.to_string(),
-                            output_for_response: None,
-                            stream_addr: stream_addr,
-                            response_status: None, // Initialize response fields to None
-                            response_headers: None,
-                            response_body: None,
-                        };
-                        
-                        // Insert the stream into the map
-                        stream_map.insert(request_id, stream);
-
-                        // if Idle
-                        // Checks if the request handler is currently in the `Idle` state.
-                        //
-                        // This function loads the current state of the handler from the `HANDLER_STATE` atomic variable
-                        // and compares it with the integer representation of the `Idle` state. 
-                        // It returns `true` if the handler is `Idle` and `false` otherwise (if it's `Busy` or `Failed`).
-                        //
-                        // Note: This check only explicitly distinguishes between `Idle` and non-`Idle` states.
-                        // It does not differentiate between `Busy` and `Failed` within this specific check. 
-                        // However, the `else` block that follows this check handles both `Busy` and `Failed` states 
-                        // by attempting to add the incoming request to the queue.
-                        if HANDLER_STATE.load(Ordering::Relaxed) == HandlerState::Idle as usize {
-                            /*
-                            handler can be: 1 busy, 2. not_busy 3. failed
-                            
-                            A. look for quit-signal_to_restart (optional, if needed later)
-                            B. if handler is not busy, give request+queue to handler & reset counter to 0
-                            C. if handler is busy, check counter
-                            E. if counter > MAX: drop request
-                            F. if counter < MAX: check if there is an existing queue
-                            G. if there is an existing queue: add request to quque
-                            H: if there is no queue: make a queue and add request to queue
-                            loop back 
-                            */
-                            // Request processing oc
-                            // when this fails (everything will fail at some point)
-                            // this should output a signal to set a 'restart' flag 
-                            // Spawn the handler thread and pass the sender channel
-                            // In main
-                            
-                            // Clone sender_clone inside the loop
-                            let sender_for_thread = sender_clone.clone(); 
-                            
-                            thread::spawn(move || {
-                                handler_of_request_and_queue(
-                                    request_unit_struct,
-                                    disposable_handoff_queue.take().unwrap(),
-                                    sender_for_thread, // Pass a clone of sender_clone
-                                );
-                            });
-
-                            // 1. handler_of_request_and_queue(request, quque)
-
-                            
-                            // Double Tap: make sure queue is removed
-                            // When the handler finishes or fails (in the handler thread or stream-loop):
-                            // let disposable_handoff_queue: Option<VecDeque<String>> = None; // Indicate that a new queue needs to be created 
-                            
-                            // 2. counter = zero
-                            // Reset the queue counter
-                            QUEUE_COUNTER.store(0, Ordering::Relaxed);
-
-                            // 3. make a new empty disposable_handoff_queue
-                            // let mut disposable_handoff_queue: Option<VecDeque<String>> = Some(VecDeque::with_capacity(MAX_QUEUE_SIZE));
-                            
-                            // if faile:
-                            // exit/continue/break stream-loop/quit/reboot
-                            
-                            
-                        } else {  // if NOT Idle: elif busy, elif failed
-                            
-                            // Handle busy/failed state (e.g., add to queue)
-                            // Check if a queue exists and add requests to it
-                            if let Some(queue) = &mut disposable_handoff_queue {
-                                // ... (add requests to the queue) ...
-                                // if queue is not full: add request to queue
-                                if QUEUE_COUNTER.load(Ordering::Relaxed) < MAX_QUEUE_SIZE {
-
-                                    // add request to queue!
-                                    queue.push_back(request_unit_struct); // Call push_back on the VecDeque inside the Option
-                     
-                                    QUEUE_COUNTER.fetch_add(1, Ordering::Relaxed);
-                            } else {
-                                // No queue available, create a new one 
-                                // let mut disposable_handoff_queue: Option<VecDeque<String>> = Some(VecDeque::with_capacity(MAX_QUEUE_SIZE));
-                                // ... (potentially add the current request to the new queue) ...
-                            }
-                            
-
-                            } else {
-                                // Ignore the request (queue is full)
-                            }
-                            
-                            // increment counter
-                            QUEUE_COUNTER.fetch_add(1, Ordering::Relaxed);
-                        }
-                        
-                        
-                        if HANDLER_STATE.load(Ordering::Relaxed) == HandlerState::Failed as usize {
-                            println!("Handler thread failed. Restarting..."); // Log the failure
-                            break; // Exit the stream-loop to signal a restart 
-                        }
                     }
+                    // } else if request_string.starts_with("GET") {
+                    //     /*
+                    //     TODO: this "works" but it returns a document containing
+                    //     the post-request format server return...
+                    //     which is something...but should be...optimized...
+                    //     */
+                        
+                    //     // let body_start = request_string.find("\r\n\r\n").unwrap_or(0) + 4;
+                    //     // let request_body = request_string[body_start..].to_string();
+                    //     let request_body = if let Some(index) = request_string.find('X') {
+                    //         &request_string[index + 1..] 
+                    //     } else {
+                    //         "" // No query string found
+                    //     };
+                        
+                    //     // // Parse query_string into parameters (e.g., using a library or manual splitting)
+                    //     // let parameters: HashMap<String, String> = /* ... parsing logic ... */;
+                        
+                    //     // let request_body = query_string;
+                    
+                    //     // Generate a unique request ID
+                    //     let request_id = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    
+                    //     // Stream Decoupling: Store stream address in RequestUnit
+                    //     let stream_addr = stream.peer_addr().unwrap(); 
+                    //     let mut request_unit_struct = RequestUnit {
+                    //         id: request_id,
+                    //         endpoint_module_name: "".to_string(),
+                    //         body: request_body.to_string(),
+                    //         output_for_response: None,
+                    //         stream_addr: stream_addr,
+                    //         response_status: None, // Initialize response fields to None
+                    //         response_headers: None,
+                    //         response_body: None,
+                    //     };
+                        
+                    //     // Insert the stream into the map
+                    //     stream_map.insert(request_id, stream);
+
+                    //     // if Idle
+                    //     // Checks if the request handler is currently in the `Idle` state.
+                    //     //
+                    //     // This function loads the current state of the handler from the `HANDLER_STATE` atomic variable
+                    //     // and compares it with the integer representation of the `Idle` state. 
+                    //     // It returns `true` if the handler is `Idle` and `false` otherwise (if it's `Busy` or `Failed`).
+                    //     //
+                    //     // Note: This check only explicitly distinguishes between `Idle` and non-`Idle` states.
+                    //     // It does not differentiate between `Busy` and `Failed` within this specific check. 
+                    //     // However, the `else` block that follows this check handles both `Busy` and `Failed` states 
+                    //     // by attempting to add the incoming request to the queue.
+                    //     if HANDLER_STATE.load(Ordering::Relaxed) == HandlerState::Idle as usize {
+                    //         /*
+                    //         handler can be: 1 busy, 2. not_busy 3. failed
+                            
+                    //         A. look for quit-signal_to_restart (optional, if needed later)
+                    //         B. if handler is not busy, give request+queue to handler & reset counter to 0
+                    //         C. if handler is busy, check counter
+                    //         E. if counter > MAX: drop request
+                    //         F. if counter < MAX: check if there is an existing queue
+                    //         G. if there is an existing queue: add request to quque
+                    //         H: if there is no queue: make a queue and add request to queue
+                    //         loop back 
+                    //         */
+                    //         // Request processing oc
+                    //         // when this fails (everything will fail at some point)
+                    //         // this should output a signal to set a 'restart' flag 
+                    //         // Spawn the handler thread and pass the sender channel
+                    //         // In main
+                            
+                    //         // Clone sender_clone inside the loop
+                    //         let sender_for_thread = sender_clone.clone(); 
+                            
+                    //         thread::spawn(move || {
+                    //             handler_of_request_and_queue(
+                    //                 request_unit_struct,
+                    //                 disposable_handoff_queue.take().unwrap(),
+                    //                 sender_for_thread, // Pass a clone of sender_clone
+                    //             );
+                    //         });
+
+                    //         // 1. handler_of_request_and_queue(request, quque)
+
+                            
+                    //         // Double Tap: make sure queue is removed
+                    //         // When the handler finishes or fails (in the handler thread or stream-loop):
+                    //         // let disposable_handoff_queue: Option<VecDeque<String>> = None; // Indicate that a new queue needs to be created 
+                            
+                    //         // 2. counter = zero
+                    //         // Reset the queue counter
+                    //         QUEUE_COUNTER.store(0, Ordering::Relaxed);
+
+                    //         // 3. make a new empty disposable_handoff_queue
+                    //         // let mut disposable_handoff_queue: Option<VecDeque<String>> = Some(VecDeque::with_capacity(MAX_QUEUE_SIZE));
+                            
+                    //         // if faile:
+                    //         // exit/continue/break stream-loop/quit/reboot
+                            
+                            
+                    //     } else {  // if NOT Idle: elif busy, elif failed
+                            
+                    //         // Handle busy/failed state (e.g., add to queue)
+                    //         // Check if a queue exists and add requests to it
+                    //         if let Some(queue) = &mut disposable_handoff_queue {
+                    //             // ... (add requests to the queue) ...
+                    //             // if queue is not full: add request to queue
+                    //             if QUEUE_COUNTER.load(Ordering::Relaxed) < MAX_QUEUE_SIZE {
+
+                    //                 // add request to queue!
+                    //                 queue.push_back(request_unit_struct); // Call push_back on the VecDeque inside the Option
+                     
+                    //                 QUEUE_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    //         } else {
+                    //             // No queue available, create a new one 
+                    //             // let mut disposable_handoff_queue: Option<VecDeque<String>> = Some(VecDeque::with_capacity(MAX_QUEUE_SIZE));
+                    //             // ... (potentially add the current request to the new queue) ...
+                    //         }
+                            
+
+                    //         } else {
+                    //             // Ignore the request (queue is full)
+                    //         }
+                            
+                    //         // increment counter
+                    //         QUEUE_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    //     }
+                        
+                        
+                    //     if HANDLER_STATE.load(Ordering::Relaxed) == HandlerState::Failed as usize {
+                    //         println!("Handler thread failed. Restarting..."); // Log the failure
+                    //         break; // Exit the stream-loop to signal a restart 
+                    //     }
+                    // }
 
                     // (maybe too old of a text comment block)4. Respond
                     /*
